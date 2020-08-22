@@ -19,7 +19,7 @@ install: all
 	cp -a webroot $(BUILDROOT)$(PREFIX)/share/jkaptive/
 	cp SuSEfirewall2 $(BUILDROOT)$(PREFIX)/share/jkaptive/
 	mkdir -p $(BUILDROOT)$(PREFIX)/share/doc/packages/jkaptive
-	cp README COPYING $(BUILDROOT)$(PREFIX)/share/doc/packages/jkaptive/
+	cp README.md LICENSE $(BUILDROOT)$(PREFIX)/share/doc/packages/jkaptive/
 
 jkaptive: top.tcl log.tcl cmdline.tcl inifile.tcl httpd.tcl token.tcl netfilterd.tcl main.tcl bottom.tcl
 	cat $^ >$@
