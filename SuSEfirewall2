@@ -1,0 +1,125 @@
+##
+## Custom rules for mating SuSEfirewall2 with jkaptive.
+## To activate, edit /etc/sysconfig/SuSEfirewall2:
+##
+## edit FW_CUSTOMRULES="/usr/share/jkaptive/SuSEfirewall2"
+## add  FW_JKAPTIVE="yes"
+## add  FW_JKAPTIVE_BACKEND="iptables"
+##       or "ipset" instead of "iptables" if you want to use that.
+##
+## add  FW_JKAPTIVE_INPUT_INTERFACES="eth0"
+##       or which input interfaces you consider to filter.
+##
+## add  FW_JKAPTIVE_CHAIN="jkaptive"
+## add  FW_JKAPTIVE_MARK="0x00200000"
+## add  FW_JKAPTIVE_PORT="8088"
+##         or what you have configured in /etc/jkaptive.conf.
+##
+## If you want to use an upstream gateway for DHCP/DNS, you
+## need additionally:
+##
+## add  FW_JKAPTIVE_FILTER_EXCEPTIONS="192.168.1.1"
+##         or whatever your upstream gateway is.
+##
+## If your upstream gateway is delivering DHCP, but DNS is directly given by an
+## internet server, 
+## 
+## add  FW_JKAPTIVE_FILTER_DNS="no"
+##
+## This allows forwarded DNS traffic to and from anywhere.
+##
+## If you want to filter packets from the host jkaptive runs on, too, you
+## need additionally: 
+##
+## edit FW_LO_NOTRACK="no"
+## add  FW_JKAPTIVE_FILTER_OUTPUT="yes"
+## add  FW_JKAPTIVE_FILTER_OUTPUT_EXCEPTIONS="192.168.1.1"
+##         or whatever your upstream gateway is.
+##
+## Note that FW_JKAPTIVE_FILTER_DNS="no" is allowing DNS traffic to anywhere
+## for output, too.
+##
+
+
+fw_jkaptive() {
+	if [ "$FW_JKAPTIVE" = 'yes' ]; then
+		## Create an additional chain/set named "jkaptive".
+		case "$FW_JKAPTIVE_BACKEND" in
+			ipset) ipset create "$FW_JKAPTIVE_CHAIN" hash:ip 2>/dev/null ;;
+			*) iptables -t mangle -N "$FW_JKAPTIVE_CHAIN" ;;
+		esac
+
+		## Activate jkaptive connection tracking.
+		case "$FW_JKAPTIVE_BACKEND" in
+			ipset) iptables -t mangle -A PREROUTING -m set --match-set "$FW_JKAPTIVE_CHAIN" src -j MARK --set-mark "$FW_JKAPTIVE_MARK" ;;
+			*) iptables -t mangle -A PREROUTING -j "$FW_JKAPTIVE_CHAIN" ;;
+		esac
+
+		## Redirect all unticketed http traffic from inside to jkaptive server.
+		for i in $FW_JKAPTIVE_INPUT_INTERFACES ; do
+			iptables -t nat -A PREROUTING -i $i -p tcp --dport 80 -m mark ! --mark "$FW_JKAPTIVE_MARK" -j REDIRECT --to-ports "$FW_JKAPTIVE_PORT"
+		done
+
+		## Rate-limit unticked http traffic to protect the jkaptive server
+		## from browsers opening a lot of connections e.g. on startup.
+		iptables -t filter -A INPUT -p tcp --dport "$FW_JKAPTIVE_PORT" -m state --state NEW -m recent --set
+		iptables -t filter -A INPUT -p tcp --dport "$FW_JKAPTIVE_PORT" -m state --state NEW -m recent --update --seconds 5 --hitcount 50 -j DROP
+
+		## Allow forwarded traffic e.g. to and from upstream gateway.
+		for i in $FW_JKAPTIVE_FILTER_EXCEPTIONS ; do
+			iptables -t filter -A FORWARD -d $i -j ACCEPT
+			iptables -t filter -A FORWARD -s $i -j ACCEPT
+		done
+
+		## Allow forwarded DNS traffic from and to anywhere
+		if [ "$FW_JKAPTIVE_FILTER_DNS" = 'no' ]; then
+			iptables -t filter -A FORWARD -p udp --dport 53 -j ACCEPT
+			iptables -t filter -A FORWARD -p udp --sport 53 -j ACCEPT
+		fi
+
+		## Reject all other unticketed traffic from inside.
+		for i in $FW_JKAPTIVE_INPUT_INTERFACES ; do
+			iptables -t filter -A FORWARD -i $i -m mark ! --mark "$FW_JKAPTIVE_MARK/$FW_JKAPTIVE_MARK" --j REJECT --reject-with=icmp-admin-prohibited
+		done
+
+		## Check if we should filter own traffic.
+		if [ "$FW_JKAPTIVE_FILTER_OUTPUT" = 'yes' ]; then
+			## Yes. Place additional rules.
+			## Activate jkaptive connection tracking.
+			case "$FW_JKAPTIVE_BACKEND" in
+				ipset) iptables -t mangle -A OUTPUT -m set --match-set "$FW_JKAPTIVE_CHAIN" src -j MARK --set-mark "$FW_JKAPTIVE_MARK" ;;
+				*) iptables -t mangle -A OUTPUT -j "$FW_JKAPTIVE_CHAIN" ;;
+			esac
+
+			## Redirect all unticketed http traffic to jkaptive server.
+			iptables -t nat -A OUTPUT -p tcp --dport 80 -m mark ! --mark "$FW_JKAPTIVE_MARK/$FW_JKAPTIVE_MARK" -j REDIRECT --to-ports "$FW_JKAPTIVE_PORT"
+		
+			## Allow traffic to self. Needed for not interfering with redirect to self.
+			iptables -t filter -A OUTPUT -d 127.0.0.1 -j ACCEPT
+
+			## Allow direct traffic e.g. to gateway for dhcp and dns requests.
+			for i in $FW_JKAPTIVE_FILTER_OUTPUT_EXCEPTIONS ; do
+				iptables -t filter -A OUTPUT -d $i -j ACCEPT
+			done	
+
+			## Allow forwarded DNS traffic to anywhere.
+			if [ "$FW_JKAPTIVE_FILTER_DNS" = 'no' ]; then
+				iptables -t filter -A OUTPUT -p udp --dport 53 -j ACCEPT
+			fi
+
+			## Reject all other unticketed traffic.
+			iptables -t filter -A OUTPUT -m mark ! --mark "$FW_JKAPTIVE_MARK/$FW_JKAPTIVE_MARK" --j REJECT --reject-with=icmp-admin-prohibited
+		fi	
+	fi
+
+	## We're done here.
+	true
+}
+
+
+fw_custom_before_masq() {
+	fw_jkaptive
+}
+
+
+

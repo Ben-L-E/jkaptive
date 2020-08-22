@@ -1,0 +1,30 @@
+body {
+	color: #303030;
+	background-color: white;
+	font: 13px verdana, arial, helvetica, sans-serif;
+}
+
+h1 {
+	color: #303030;
+	font: 3em/1 Georgia, "Times New Roman", Times, serif;
+	font-style: italic;
+	font-weight: 900;
+}
+
+#box {
+	width: 500px;
+	margin: 100px auto;
+	text-align: left;
+	padding: 3em;
+	border: 1px dashed #303030;
+	background-color:#e0e0e0;
+}
+
+#icon {
+	float: left;
+	margin: 2ex 3em 10ex 0px;
+}
+
+#tokenbox * {
+	font-size: 200%;
+}

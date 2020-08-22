@@ -1,0 +1,99 @@
+#!/usr/bin/tclsh
+## /------>
+## |
+## | jkaptive-token - a simple captive portal, token generator
+## |
+## | Author: Jan Kandziora <jjj@gmx.de>
+## | Version: 1.9
+## |
+## \-----------------<
+##
+##
+## LICENSE
+## =======
+## I, Jan Kandziora, the author of jkaptive, grant you the right
+## to use, copy, distribute and modify this software under the terms of the
+## GNU General Public License(GPL), Version 2 (see file COPYING).
+##
+
+
+## Load required packages.
+package require cmdline
+package require base64
+package require crc16
+
+
+## Xor permutation helper.
+proc xor {data key} {
+	binary scan $data c[string length $data] data
+	binary scan $key c key
+
+	set result {}
+	foreach byte $data {
+		append result [binary format c [expr {$byte^$key}]]
+	}
+
+	return $result
+}
+
+
+## Parse the command line.
+if {[catch {::cmdline::getoptions argv {
+		{-version "output version and exit"}
+		{-perm.arg {} "additional permutation bits (range: 0..255, default: random)"}
+		} \
+		{[options] salt expirydate/-distance -- options are:}} parm]} {
+  ## Print usage message.
+  puts stderr $parm
+  exit 127
+}
+
+
+## Version output?
+if {[dict get $parm -version]} {
+	puts stderr "jkaptive-token 1.9"
+	puts stderr "Copyright (C) 2012 Jan Kandziora"
+	puts stderr "License GPLv2: GNU GPL version 2 <http://gnu.org/licenses/gpl.html>."
+	puts stderr "This is free software: you are free to change and redistribute it."
+	puts stderr "There is NO WARRANTY, to the extent permitted by law."
+	puts stderr "\nWritten by Jan Kandziora <jjj@gmx.de>"
+	exit 127
+}
+
+
+## Get additional permutation bits.
+if {[dict get $parm -perm] eq {}} {
+	set perm [expr {int(256*rand())}]
+} {
+	set perm [expr {[dict get $parm -perm]%256}]
+}
+
+
+## Switch by argument count.
+switch -- [llength $argv] {
+	2 {
+		## Check expiry date/distance.
+		if {[catch {clock add [clock seconds] {*}[lindex $argv 1]} expires]} {
+			if {[catch {clock scan [lindex $argv 1]} expires]} {
+				puts stderr "supply either a date or time difference"
+				exit 127
+			}
+		}
+
+		## Note expiry date
+		puts stderr "Token valid until [clock format $expires -format "%Y-%m-%d %H:%M"]"
+
+		## Generate and print token.
+		set token [binary format cu $perm]
+		set data [binary format iu $expires]
+		append data [binary format su [::crc::crc16 [lindex $argv 0]]]
+		append data [binary format su [::crc::crc16 $data]]
+		append token [xor $data $token]
+		puts [::base64::encode $token]
+	}
+	default {
+		## Arguments given. Error.
+  	puts stderr "USAGE: $::argv0 \[options\] salt expire_distance"
+		exit 127
+	}
+}
